@@ -14,6 +14,7 @@ POLL_INTERVAL = 0.4
 client_dir = os.path.join(os.getcwd(), 'client')
 words = []
 num_created = 0
+DEFAULT_TURN_SECONDS = 30
 
 def json_response(f):
     @wraps(f)
@@ -23,13 +24,13 @@ def json_response(f):
     return decorated_function
 
 class GameManager(object):
-    def __init__(self, name):
+    def __init__(self, name, turn_seconds=DEFAULT_TURN_SECONDS):
         global game_map
 
         self.uuid = name
         self.starter = uuid.uuid4().hex
         game_map[self.uuid] = self
-        self.game = Game()
+        self.game = Game(turn_seconds)
         self.changed = {}
         self.chats = []
         self.ended = {}
@@ -59,6 +60,10 @@ class GameManager(object):
         global game_map
 
         while not self.changed[pid]:
+            if self.game.is_turn_timed_out():
+                self.game.next()
+                self.has_changed()
+                continue
             time.sleep(POLL_INTERVAL)
             yield " "
 
@@ -161,7 +166,16 @@ def create_game(game):
 
     if game in game_map:
         return {'result': {'error': 'Game already exists, try another name'}}
-    new_game = GameManager(game)
+    payload = request.get_json(force=True, silent=True) or {}
+    turn_seconds = payload.get('turnSeconds', DEFAULT_TURN_SECONDS)
+    try:
+        turn_seconds = int(turn_seconds)
+    except (TypeError, ValueError):
+        turn_seconds = DEFAULT_TURN_SECONDS
+    if turn_seconds <= 0:
+        turn_seconds = DEFAULT_TURN_SECONDS
+
+    new_game = GameManager(game, turn_seconds)
     num_created += 1
     return {'game': new_game.uuid, 'start': new_game.starter, 'state': new_game.game.dict()}
 
@@ -347,4 +361,4 @@ if __name__ == '__main__':
         pass
 
     signal.signal(signal.SIGHUP, save_and_exit)
-    app.run(host='127.0.0.1', port=8000, threaded=True)
+    app.run(host='0.0.0.0', port=8000, threaded=True)
