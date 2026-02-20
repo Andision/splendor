@@ -10,3 +10,9 @@ services:
             - ./client:/client
         working_dir: /
         command: python /server/splendor.py
+    client-build:
+        image: node:16-alpine
+        volumes:
+            - ./client:/client
+        working_dir: /client
+        command: sh -lc "npm install && npx webpack --config webpack.config.js --entry ./src/index.tsx --output ./dist/main.js"

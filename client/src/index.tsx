@@ -66,6 +66,8 @@ interface GameT {
   nobles: NobleT[]
   winner: number | null
   turn: number
+  turn_seconds?: number
+  turn_deadline?: number | null
 }
 
 interface ChatT {
@@ -83,6 +85,7 @@ interface GameState extends GameT {
   showLog: boolean
   chat: ChatT[]
   chatNotify: boolean
+  nowMs: number
 }
 
 interface ServerResponse {
@@ -107,10 +110,15 @@ let globalShowError = (resp: ServerResponse) => { return false }
     return gemColors.map((color: GemT) => {
       var cName = color + "chip"
       if (color === '*') cName = "schip"
+      const clickable = color !== '*'
       return (
-        <div className={"gem " + cName} key={color + "_colors_" + uuid}>
+        <div
+          className={"gem " + cName + (clickable ? " gem-clickable" : " gem-disabled")}
+          key={color + "_colors_" + uuid}
+          onClick={clickable ? callback.bind(game, color) : undefined}
+        >
           <div className="bubble">{gems[color]}</div>
-          <div className="underlay" onClick={callback.bind(game, color)}>{symbol}</div>
+          <div className="underlay">{clickable ? symbol : ''}</div>
         </div>
       );
     });
@@ -375,7 +383,10 @@ let globalShowError = (resp: ServerResponse) => { return false }
     }
   }
 
-  class Game extends React.PureComponent<{ gid: string, pid: number, uuid: string }, GameState> {
+class Game extends React.PureComponent<{ gid: string, pid: number, uuid: string }, GameState> {
+    ticker: number | null = null
+    timeoutAudio: HTMLAudioElement | null = null
+
     state = {
       players: [],
       gems: {},
@@ -393,6 +404,9 @@ let globalShowError = (resp: ServerResponse) => { return false }
       showChat: false,
       showLog: false,
       chatNotify: false,
+      turn_seconds: 30,
+      turn_deadline: null,
+      nowMs: Date.now(),
     } as GameState
 
     isMyTurn = (turn: number) => {
@@ -423,6 +437,9 @@ let globalShowError = (resp: ServerResponse) => { return false }
           gems: r.state.gems,
           nobles: r.state.nobles,
           turn: r.state.turn,
+          turn_seconds: r.state.turn_seconds,
+          turn_deadline: r.state.turn_deadline,
+          nowMs: Date.now(),
         });
 
         if (r.state.winner !== null && this.state.phase != "postgame") {
@@ -516,6 +533,47 @@ let globalShowError = (resp: ServerResponse) => { return false }
     componentDidMount() {
       this.stat()
       this.poll()
+      this.ticker = window.setInterval(() => this.setState({ nowMs: Date.now() }), 1000)
+      this.timeoutAudio = document.getElementById("timeout") as HTMLAudioElement | null
+      if (this.timeoutAudio) {
+        this.timeoutAudio.loop = true
+      }
+    }
+
+    componentDidUpdate() {
+      this.syncTimeoutAudio()
+    }
+
+    componentWillUnmount() {
+      if (this.ticker !== null) {
+        window.clearInterval(this.ticker)
+      }
+      this.stopTimeoutAudio()
+    }
+
+    turnRemaining = () => {
+      if (this.state.turn < 0 || !this.state.turn_deadline) return null
+      const remaining = Math.ceil(this.state.turn_deadline - this.state.nowMs / 1000)
+      return Math.max(0, remaining)
+    }
+
+    stopTimeoutAudio = () => {
+      if (!this.timeoutAudio) return
+      this.timeoutAudio.pause()
+      this.timeoutAudio.currentTime = 0
+    }
+
+    syncTimeoutAudio = () => {
+      if (!this.timeoutAudio) return
+      const remaining = this.turnRemaining()
+      const shouldPlay = remaining !== null && remaining > 0 && remaining <= 10 && this.state.turn === this.props.pid
+      if (shouldPlay) {
+        if (this.timeoutAudio.paused) {
+          this.timeoutAudio.play().catch(() => {})
+        }
+      } else {
+        this.stopTimeoutAudio()
+      }
     }
 
     chat = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -578,6 +636,7 @@ let globalShowError = (resp: ServerResponse) => { return false }
           />
         )
       });
+      const turnRemaining = this.turnRemaining()
       return (
         <div>
           <div id="game-board">
@@ -617,8 +676,15 @@ let globalShowError = (resp: ServerResponse) => { return false }
               <input id="chat-inner" type="text" onKeyPress={this.chat}></input>
             </div>
           </div>
-          {this.state.turn >= 0 && this.props.pid >= 0 && this.props.pid < 4 &&
-            <button id={`pass-turn`} onClick={this.nextTurn} style={{ opacity: this.isMyTurn(this.state.turn) ? 1 : 0.3 }}>Pass turn</button>
+          {(this.state.turn >= 0 && this.props.pid >= 0 && this.props.pid < 4) &&
+            <div id="turn-controls">
+              {turnRemaining !== null &&
+                <div id="turn-timer">
+                  {this.state.turn === this.props.pid ? "Your turn" : "Turn"}: {turnRemaining}s
+                </div>
+              }
+              <button id={`pass-turn`} onClick={this.nextTurn} style={{ opacity: this.isMyTurn(this.state.turn) ? 1 : 0.3 }}>Pass turn</button>
+            </div>
           }
         </div>
       );
@@ -636,6 +702,7 @@ let globalShowError = (resp: ServerResponse) => { return false }
     loading: boolean
     lobby: boolean
     gameName: string
+    turnSecondsInput: string
     joined: boolean
     pid: number
     uuid: string
@@ -654,6 +721,7 @@ let globalShowError = (resp: ServerResponse) => { return false }
       uuid: '',
       gid: '',
       gameName: '',
+      turnSecondsInput: '30',
       errorOpacity: 0,
       error: null,
     } as GameCreatorState
@@ -717,7 +785,13 @@ let globalShowError = (resp: ServerResponse) => { return false }
       if (this.creating) return
       this.creating = true
       const gameName = this.state.gid === '' ? this.state.gameName : this.state.gid
-      const resp = await fetch(`/create/${gameName}`, { method: "POST" })
+      const parsedTurnSeconds = parseInt((this.state.turnSecondsInput || '').trim(), 10)
+      const turnSeconds = Number.isFinite(parsedTurnSeconds) && parsedTurnSeconds > 0 ? parsedTurnSeconds : 30
+      const resp = await fetch(`/create/${gameName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turnSeconds }),
+      })
       const json = await resp.json()
 
       if (this.showError(json)) return
@@ -790,6 +864,10 @@ let globalShowError = (resp: ServerResponse) => { return false }
       this.setState({ gameName: e.target.value })
     }
 
+    turnSecondsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      this.setState({ turnSecondsInput: e.target.value })
+    }
+
     keyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") this.createGame()
     }
@@ -805,9 +883,19 @@ let globalShowError = (resp: ServerResponse) => { return false }
         return <div className="lobby">
           <div className="main-title">Splendor</div>
           <div className="desc">Play Splendor online with others. Enter a game name or use the suggested game name to start a game.</div>
-          <div className="name">
-            <input className="game-name" type="text" onChange={this.nameChange} onKeyPress={this.keyPress} value={this.state.gameName} />
-            <button onClick={this.createGame} className="create-game">Create Game</button>
+          <div className="lobby-form">
+            <div className="input-row">
+              <span className="input-label">Game Name:</span>
+              <input className="game-name lobby-input" type="text" onChange={this.nameChange} onKeyPress={this.keyPress} value={this.state.gameName} />
+            </div>
+            <div className="input-row">
+              <span className="input-label">Turn Time:</span>
+              <input className="game-name lobby-input lobby-seconds" type="number" min={1} onChange={this.turnSecondsChange} onKeyPress={this.keyPress} value={this.state.turnSecondsInput} />
+              <span className="input-suffix">seconds / turn</span>
+            </div>
+            <div className="input-row input-row-actions">
+              <button onClick={this.createGame} className="create-game">Create Game</button>
+            </div>
           </div>
           <ErrorMsg error={this.state.error} opacity={this.state.errorOpacity} />
         </div>

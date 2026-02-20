@@ -336,7 +336,7 @@ def noble_from_dict(obj):
     return self
 
 class Game(object):
-    def __init__(self):
+    def __init__(self, turn_seconds=30):
         level_1 = [
             Card('b', 0, 1, 1, 1, 1, 0),
             Card('b', 0, 1, 2, 1, 1, 0),
@@ -472,6 +472,8 @@ class Game(object):
                 card.level = level
 
         self.updated_at = time.time()
+        self.turn_seconds = turn_seconds
+        self.turn_deadline = None
 
     def dict(self, player_id=None):
         if player_id is None:
@@ -488,6 +490,8 @@ class Game(object):
             'decks': {},
             'winner': self.winner,
             'turn': self.active_player_index,
+            'turn_seconds': self.turn_seconds,
+            'turn_deadline': self.turn_deadline,
         }
         for level in LEVELS:
             result['cards'][level] = array_dict(self.cards[level])
@@ -524,6 +528,8 @@ class Game(object):
             'winner': self.winner,
             'state': self.state,
             'turn': self.active_player_index,
+            'turn_seconds': self.turn_seconds,
+            'turn_deadline': self.turn_deadline,
         }
 
     def log(self, msg):
@@ -585,10 +591,21 @@ class Game(object):
             self.state = 'postgame'
             self.winner = self.determine_winner()
             self.active_player_index = -1
+            self.turn_deadline = None
         else:
             self.active_player().start_turn()
             self.refill()
+            self.turn_deadline = time.time() + self.turn_seconds
         return {}
+
+    def is_turn_timed_out(self):
+        if self.state != 'game':
+            return False
+        if self.active_player_index < 0:
+            return False
+        if self.turn_deadline is None:
+            return False
+        return time.time() >= self.turn_deadline
 
     def determine_winner(self):
         players = [(p.tiebreak_score(), p.id) for p in self.players[:self.num_players]]
@@ -646,6 +663,10 @@ def game_from_dict(obj):
     self.pids = obj['pids']
     self.state = obj['state']
     self.active_player_index = obj['turn']
+    self.turn_seconds = obj.get('turn_seconds', 30)
+    self.turn_deadline = obj.get('turn_deadline')
+    if self.state == 'game' and self.active_player_index >= 0 and self.turn_deadline is None:
+        self.turn_deadline = time.time() + self.turn_seconds
     self.num_players = obj['num_players']
     self.players = [player_from_dict(p, self) if p else None for p in obj['players']]
     for k, v in obj['cards'].iteritems():
@@ -654,4 +675,3 @@ def game_from_dict(obj):
         self.decks[k] = [card_from_dict(c) for c in v]
     self.nobles = [noble_from_dict(n) for n in obj['nobles']]
     return self
-

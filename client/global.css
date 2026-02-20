@@ -42,6 +42,51 @@ a {
   margin-top: 40px;
 }
 
+.lobby-form {
+  margin-top: 40px;
+  width: 560px;
+}
+
+.input-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.input-label {
+  width: 140px;
+  text-align: right;
+  margin-right: 12px;
+}
+
+.input-suffix {
+  margin-left: 12px;
+  width: 130px;
+  text-align: left;
+  font-weight: 100;
+}
+
+.lobby-input {
+  border-radius: 4px;
+  width: 260px;
+}
+
+.lobby-seconds {
+  width: 120px;
+}
+
+.input-row-actions {
+  justify-content: center;
+}
+
+.input-row-actions .create-game {
+  border: 2px solid #222;
+  border-radius: 4px;
+  top: 0;
+  margin-right: 0;
+}
+
 .name0 {
   color: #2F80ED;
 }
@@ -146,15 +191,34 @@ button {
   -webkit-text-stroke-color: black;
 }
 
-#pass-turn {
+#turn-controls {
   position: fixed;
   top: 7px;
-  right: 0px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 1200;
+}
+
+#pass-turn {
+  position: static;
   padding: 4px 15px 4px 15px;
   cursor: pointer;
   background-color: white;
-  border-right: 2px solid black;
-  border-top: 2px solid black;
+  border: 2px solid black;
+  border-radius: 8px;
+  margin-right: 0;
+}
+
+#turn-timer {
+  position: static;
+  background-color: rgba(255, 255, 255, 0.95);
+  border: 2px solid black;
+  border-radius: 8px;
+  padding: 4px 12px;
+  -webkit-text-fill-color: black;
+  font-size: 14px;
 }
 
 .playerName, .turnIndicator {
@@ -794,6 +858,11 @@ button {
   font-style: normal;
   font-size: 300%;
   cursor: pointer;
+}
+
+.you .gem.gem-clickable {
+  cursor: pointer;
+  touch-action: manipulation;
 }
 
 .gem .underlay {
